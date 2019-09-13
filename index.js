@@ -55,12 +55,6 @@ feed.on("ready", () => {
           console.error(err);
         } else {
           console.log("feed replicated:", data.toString());
-
-          feed.append("yee", err => {
-            if (err) {
-              console.error(err);
-            }
-          });
         }
       });
     }
