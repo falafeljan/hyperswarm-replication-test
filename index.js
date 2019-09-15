@@ -1,77 +1,49 @@
 const hyperswarm = require("hyperswarm");
-const crypto = require("crypto");
-const ram = require("random-access-memory");
-const hypercore = require("hypercore");
+const storage = require("random-access-memory");
+const { Repo } = require("hypermerge");
 const pump = require("pump");
 const fs = require("fs");
 
-let feed;
+let url;
 const client = process.argv.length > 2 && process.argv[2] === "--client";
-if (client) {
-  const key = Buffer.from(
-    JSON.parse(fs.readFileSync(`${__dirname}/../feed.json`, "utf-8")).key
-  );
-
-  feed = hypercore(() => ram(), key);
-} else {
-  feed = hypercore(() => ram());
-}
-
+const repo = new Repo({ path: ".data", storage });
 const swarm = hyperswarm();
 
-// look for peers listed under this topic
-const topic = crypto
-  .createHash("sha256")
-  .update("jans-hyperswarm-network-test")
-  .digest();
+if (client) {
+  url = JSON.parse(fs.readFileSync(`${__dirname}/feed.json`, "utf-8")).url;
+  console.log("read url, going client");
+} else {
+  url = repo.create({ hello: "world" });
+  console.log("created repo, going server", url);
 
-const op = callback =>
-  !client ? feed.append("cyber", (err, seq) => callback(err, seq)) : callback();
+  fs.writeFileSync(
+    `${__dirname}/feed.json`,
+    JSON.stringify({
+      url
+    })
+  );
+}
 
-feed.on("ready", () => {
-  if (!client) {
-    console.log("key", feed.key.toString());
+swarm.on("connection", (socket, { type, peer }) => {
+  console.log("connected to peer");
 
-    fs.writeFileSync(
-      `${__dirname}/../feed.json`,
-      JSON.stringify({
-        key: feed.key
-      })
-    );
-  }
+  const info = {
+    type: type,
+    initiator: !!peer,
+    id: null,
+    host: peer ? peer.host : socket.remoteAddress,
+    port: peer ? peer.port : socket.remotePort,
+    channel: peer ? peer.topic : null
+  };
 
-  op((err, seq) => {
-    console.log("feed data appended");
+  const rep = repo.stream(info);
 
-    if (!client) {
-      if (err) {
-        console.error(err);
-      } else {
-        console.log("sequence", seq);
-      }
-    } else {
-      feed.get(0, { wait: true }, (err, data) => {
-        if (err) {
-          console.error(err);
-        } else {
-          console.log("feed replicated:", data.toString());
-        }
-      });
-    }
-
-    feed.on("download", (index, data) =>
-      console.log("downloaded", index, data.toString())
-    );
-    feed.on("upload", (index, data) => console.log("uploaded", index, data));
-
-    swarm.join(topic, {
-      lookup: client,
-      announce: !client
-    });
-    console.log("swarming");
-
-    swarm.on("connection", socket => {
-      pump(socket, feed.replicate(), socket);
-    });
+  pump(socket, rep, socket, () => {
+    console.log("data pumped");
   });
 });
+
+repo.replicate(swarm);
+repo.watch(url, state =>
+  console.log("repo changed", JSON.stringify(state, null, 2))
+);
