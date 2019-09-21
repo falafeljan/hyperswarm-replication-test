@@ -43,7 +43,7 @@ swarm.on("connection", (socket, { type, peer }) => {
   });
 });
 
-repo.replicate(swarm);
+repo.setSwarm(swarm);
 repo.watch(url, state =>
   console.log("repo changed", JSON.stringify(state, null, 2))
 );
